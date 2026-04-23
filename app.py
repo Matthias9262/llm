@@ -4,19 +4,19 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import re
 
-# ==============================
+# =============================
 # CONFIG
-# ==============================
-st.set_page_config(page_title="LLM Readability Audit Pro", layout="wide")
+# =============================
+st.set_page_config(page_title="LLM Audit Pro", layout="wide")
 
-st.title("🧠 LLM Readability Audit – Enterprise + ROI + Multi-Site + Framework Detection")
-st.write("Audit avancé SEO / LLM / UX + ROI business + comparaison multi-sites + détection techno frontend")
+st.title("🧠 LLM Readability Audit – Cabinet Version Pro")
+st.write("Audit SEO / LLM / UX + analyse détaillée + ROI + comparaison")
 
-urls_input = st.text_area("🔗 URLs à analyser (une par ligne)")
+urls_input = st.text_area("🔗 URLs (une par ligne)")
 
-# ==============================
+# =============================
 # FETCH
-# ==============================
+# =============================
 def fetch_html(url):
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
@@ -25,50 +25,46 @@ def fetch_html(url):
     except:
         return ""
 
-# ==============================
+# =============================
 # FRAMEWORK DETECTION
-# ==============================
+# =============================
 def detect_framework(html):
-    html_lower = html.lower()
-
-    if "__next" in html_lower or "next-data" in html_lower:
-        return "Next.js (React SSR)"
-    if "data-reactroot" in html_lower or "react" in html_lower:
+    h = html.lower()
+    if "next" in h or "__next" in h:
+        return "Next.js (SSR React)"
+    if "react" in h:
         return "React SPA"
-    if "vue" in html_lower or "v-bind" in html_lower:
+    if "vue" in h:
         return "Vue.js"
-    if "ng-" in html_lower or "angular" in html_lower:
+    if "angular" in h:
         return "Angular"
-    return "Unknown / Server-rendered possible"
+    return "Server-rendered / Unknown"
 
-# ==============================
-# ANALYSIS CORE
-# ==============================
+# =============================
+# DETAILED ANALYSIS
+# =============================
 def analyze(url):
     html = fetch_html(url)
     soup = BeautifulSoup(html, "lxml")
 
-    text = soup.get_text(separator=" ")
+    text = soup.get_text(" ")
     words = len(text.split())
 
-    h1 = len(soup.find_all("h1"))
-    h2 = len(soup.find_all("h2"))
+    h1 = soup.find_all("h1")
+    h2 = soup.find_all("h2")
 
-    images = soup.find_all("img")
-    missing_alt = len([img for img in images if not img.get("alt")])
+    imgs = soup.find_all("img")
+    missing_alt = [i for i in imgs if not i.get("alt")]
 
     scripts = soup.find_all("script")
-    script_count = len(scripts)
 
-    title = soup.title.text.strip() if soup.title else None
-    meta_desc = soup.find("meta", attrs={"name": "description"})
-
-    canonical = soup.find("link", rel="canonical")
-    lang = soup.html.get("lang") if soup.html else None
-
-    is_spa = words < 80 and script_count > 10
+    title = soup.title.text if soup.title else None
+    meta = soup.find("meta", attrs={"name": "description"})
 
     framework = detect_framework(html)
+
+    issues = []
+    actions = []
 
     # SCORES
     seo = 100
@@ -76,123 +72,145 @@ def analyze(url):
     tech = 100
     ux = 100
 
-    issues = []
-
+    # =============================
+    # SEO ANALYSIS
+    # =============================
     if not title:
         seo -= 15
-        issues.append("Missing title")
+        issues.append("❌ Title manquant")
+        actions.append("Ajouter une balise <title> unique et descriptive")
 
-    if h1 == 0:
+    if len(h1) == 0:
         seo -= 20
-        issues.append("No H1")
+        issues.append("❌ Aucun H1 détecté")
+        actions.append("Ajouter un H1 unique par page")
 
-    if h2 < 2:
+    if len(h2) < 2:
         seo -= 10
-        issues.append("Weak H2 structure")
+        issues.append("⚠️ Structure H2 faible")
+        actions.append("Structurer contenu avec H2 (sections claires)")
 
-    if not meta_desc:
+    if not meta:
         seo -= 10
-        issues.append("Missing meta description")
+        issues.append("⚠️ Meta description absente")
+        actions.append("Ajouter meta description optimisée SEO")
 
+    # =============================
+    # CONTENT ANALYSIS
+    # =============================
     if words < 300:
         content -= 25
-        issues.append("Low content density")
+        issues.append("❌ Contenu trop faible")
+        actions.append("Ajouter du contenu textuel riche (FAQ, guides, pages)")
 
+    sample_text = text[:400]
+
+    # =============================
+    # TECH ANALYSIS
+    # =============================
+    if len(scripts) > 30:
+        tech -= 25
+        issues.append("⚠️ Trop de JavaScript")
+        actions.append("Réduire JS ou passer en SSR (Next.js)")
+
+    # =============================
+    # UX / ACCESSIBILITY
+    # =============================
+    if len(missing_alt) > 0:
+        ux -= 20
+        issues.append(f"❌ {len(missing_alt)} images sans ALT")
+        actions.append("Ajouter attribut ALT sur toutes les images")
+
+    # =============================
+    # SPA DETECTION
+    # =============================
+    is_spa = words < 80 and len(scripts) > 10
     if is_spa:
         content -= 20
-        issues.append("SPA-like JS rendered content")
-
-    if script_count > 30:
-        tech -= 25
-        issues.append("Heavy JavaScript usage")
-
-    if missing_alt > 0:
-        ux -= 20
-        issues.append("Missing image ALT attributes")
-
-    if not lang:
-        ux -= 5
-        issues.append("Missing lang attribute")
+        issues.append("⚠️ Site SPA-like (contenu injecté JS)")
+        actions.append("Passer en SSR pour rendre le contenu lisible IA/SEO")
 
     global_score = int((seo + content + tech + ux) / 4)
 
     return {
         "url": url,
+        "framework": framework,
+        "score": global_score,
         "seo": seo,
         "content": content,
         "tech": tech,
         "ux": ux,
-        "global": global_score,
         "words": words,
-        "h1": h1,
-        "h2": h2,
-        "scripts": script_count,
-        "missing_alt": missing_alt,
-        "framework": framework,
-        "issues": issues
+        "h1": len(h1),
+        "h2": len(h2),
+        "scripts": len(scripts),
+        "missing_alt": len(missing_alt),
+        "issues": issues,
+        "actions": actions,
+        "sample": sample_text
     }
 
-# ==============================
+# =============================
 # ROI MODEL
-# ==============================
-def estimate_roi(score_before, score_after):
-    improvement = score_after - score_before
-    traffic_gain = improvement * 1.8  # heuristic
-    conversion_gain = improvement * 0.6
-    revenue_impact = improvement * 120  # arbitrary business multiplier
-
+# =============================
+def roi(before, after):
+    diff = after - before
     return {
-        "traffic_gain_%": round(traffic_gain, 2),
-        "conversion_gain_%": round(conversion_gain, 2),
-        "estimated_revenue_impact_eur": round(revenue_impact, 2)
+        "traffic_gain_%": round(diff * 2.0, 2),
+        "conversion_gain_%": round(diff * 0.7, 2),
+        "revenue_impact_estimate_eur": round(diff * 150, 2)
     }
 
-# ==============================
+# =============================
 # UI
-# ==============================
+# =============================
 if urls_input:
     urls = [u.strip() for u in urls_input.split("\n") if u.strip()]
 
-    results = []
-
-    for u in urls:
-        results.append(analyze(u))
-
-    st.subheader("📊 Multi-site comparison")
+    results = [analyze(u) for u in urls]
 
     df = pd.DataFrame([
-        {"URL": r["url"], "Score": r["global"], "Framework": r["framework"]}
-        for r in results
+        {
+            "URL": r["url"],
+            "Score": r["score"],
+            "Framework": r["framework"]
+        } for r in results
     ])
 
+    st.subheader("📊 Comparaison globale")
     st.bar_chart(df.set_index("URL")["Score"])
-
     st.dataframe(df)
 
-    # BEST / WORST
-    best = max(results, key=lambda x: x["global"])
-    worst = min(results, key=lambda x: x["global"])
+    best = max(results, key=lambda x: x["score"])
+    worst = min(results, key=lambda x: x["score"])
 
     st.subheader("🏆 Insights")
-    st.success(f"Best site: {best['url']} ({best['global']}/100)")
-    st.error(f"Worst site: {worst['url']} ({worst['global']}/100)")
+    st.success(f"Meilleur site: {best['url']} ({best['score']})")
+    st.error(f"Moins performant: {worst['url']} ({worst['score']})")
 
-    # ROI SIMULATION
-    st.subheader("💰 ROI estimation (optimization impact)")
+    st.subheader("💰 ROI estimé (optimisation potentielle)")
+    st.write(roi(worst["score"], best["score"]))
 
-    roi = estimate_roi(worst["global"], best["global"])
+    st.subheader("🔎 Analyse détaillée site par site")
 
-    st.write(roi)
-
-    # FRAMEWORK BREAKDOWN
-    st.subheader("⚙️ Framework detection")
-    st.write(df[["URL", "Framework"]])
-
-    # ISSUES DETAIL
-    st.subheader("⚠️ Detailed issues per site")
     for r in results:
-        st.write("---")
-        st.write(r["url"])
-        st.write(r["issues"])
-else:
-    st.info("Enter multiple URLs (one per line) to start analysis")
+        st.markdown(f"---\n### {r['url']}")
+        st.write(f"**Framework détecté :** {r['framework']}")
+        st.write(f"**Score global : {r['score']}/100")
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("SEO", r["seo"])
+        col2.metric("Content", r["content"])
+        col3.metric("Tech", r["tech"])
+        col4.metric("UX", r["ux"])
+
+        st.write("### ⚠️ Problèmes")
+        for i in r["issues"]:
+            st.warning(i)
+
+        st.write("### 🛠 Actions correctives")
+        for a in r["actions"]:
+            st.success(a)
+
+        st.write("### 📄 Extrait contenu analysé")
+        st.code(r["sample"])
