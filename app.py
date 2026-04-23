@@ -1,52 +1,73 @@
 import streamlit as st
+import requests
+from bs4 import BeautifulSoup
 import pandas as pd
 import re
-from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
 
-# ==============================
+# =============================
 # CONFIG
-# ==============================
-st.set_page_config(page_title="LLM Audit Pro", layout="wide")
+# =============================
+st.set_page_config(page_title="LLM Audit Pro Stable", layout="wide")
 
-st.title("🧠 LLM Readability Audit – Playwright Enhanced (SSR + SPA aware)")
-st.write("Audit SEO / LLM / UX avec rendu JS réel + analyse cabinet de conseil")
+st.title("🧠 LLM Readability Audit – Stable Cloud Version")
+st.write("Audit SEO / LLM / UX sans Playwright (100% compatible Streamlit Cloud)")
 
-urls_input = st.text_area("🔗 URLs à analyser (une par ligne)")
+urls_input = st.text_area("🔗 URLs (une par ligne)")
 
-# ==============================
-# FETCH (RENDERED HTML)
-# ==============================
+# =============================
+# FETCH SAFE (NO JS)
+# =============================
 def fetch_html(url):
+    headers = {"User-Agent": "Mozilla/5.0"}
+
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url, timeout=30000)
-            html = page.content()
-            browser.close()
-            return html
-    except Exception as e:
+        r = requests.get(url, headers=headers, timeout=15)
+        return r.text
+    except:
         return ""
 
-# ==============================
-# FRAMEWORK DETECTION
-# ==============================
+# =============================
+# SPA / JS HEURISTIC
+# =============================
+def detect_spa(html, text_length):
+    html_lower = html.lower()
+
+    js_indicators = [
+        "__next",
+        "react",
+        "vue",
+        "angular",
+        "root",
+        "app",
+        "bundle",
+    ]
+
+    js_score = sum(1 for i in js_indicators if i in html_lower)
+
+    if text_length < 120 and js_score >= 2:
+        return True, js_score
+
+    return False, js_score
+
+# =============================
+# FRAMEWORK GUESS
+# =============================
 def detect_framework(html):
     h = html.lower()
+
     if "__next" in h or "next-data" in h:
-        return "Next.js (SSR React)"
-    if "react" in h or "data-reactroot" in h:
+        return "Next.js (SSR/Hybrid)"
+    if "react" in h:
         return "React SPA"
     if "vue" in h:
         return "Vue.js"
     if "angular" in h:
         return "Angular"
-    return "Server-rendered / Unknown"
+    return "Unknown / Server-rendered"
 
-# ==============================
-# ANALYSIS
-# ==============================
+# =============================
+# ANALYSIS CORE
+# =============================
 def analyze(url):
     html = fetch_html(url)
     soup = BeautifulSoup(html, "lxml")
@@ -62,13 +83,15 @@ def analyze(url):
 
     scripts = soup.find_all("script")
 
-    title = soup.title.text if soup.title else None
+    title = soup.title.text.strip() if soup.title else None
     meta = soup.find("meta", attrs={"name": "description"})
     lang = soup.html.get("lang") if soup.html else None
 
+    is_spa, js_score = detect_spa(html, words)
     framework = detect_framework(html)
 
-    is_spa = words < 120 and len(scripts) > 10
+    issues = []
+    actions = []
 
     # SCORES
     seo = 100
@@ -76,14 +99,13 @@ def analyze(url):
     tech = 100
     ux = 100
 
-    issues = []
-    actions = []
-
+    # =============================
     # SEO
+    # =============================
     if not title:
         seo -= 15
         issues.append("Title manquant")
-        actions.append("Ajouter balise title optimisée")
+        actions.append("Ajouter balise <title> optimisée")
 
     if h1 == 0:
         seo -= 20
@@ -98,24 +120,29 @@ def analyze(url):
         seo -= 10
         issues.append("Meta description absente")
 
+    # =============================
     # CONTENT
+    # =============================
     if words < 300:
         content -= 25
-        issues.append("Contenu trop faible")
-        actions.append("Ajouter contenu HTML indexable (FAQ, texte)")
+        issues.append("Contenu trop faible (SEO + LLM)")
+        actions.append("Ajouter contenu HTML indexable (FAQ, texte, guides)")
 
     if is_spa:
         content -= 20
-        issues.append("SPA détecté (risque SEO/LLM)")
-        actions.append("Passer en SSR (Next.js / rendu serveur)")
+        issues.append("Site SPA détecté (risque LLM visibility)")
+        actions.append("Ajouter rendu serveur ou pré-render (SSR / SSG)")
 
+    # =============================
     # TECH
+    # =============================
     if len(scripts) > 30:
         tech -= 20
-        issues.append("Trop de JS")
-        actions.append("Réduire JS ou lazy load")
+        issues.append("Trop de JavaScript")
 
+    # =============================
     # UX
+    # =============================
     if missing_alt > 0:
         ux -= 15
         issues.append(f"{missing_alt} images sans ALT")
@@ -127,7 +154,7 @@ def analyze(url):
 
     global_score = int((seo + content + tech + ux) / 4)
 
-    sample = text[:500]
+    sample = text[:600]
 
     return {
         "url": url,
@@ -142,25 +169,27 @@ def analyze(url):
         "h2": h2,
         "scripts": len(scripts),
         "missing_alt": missing_alt,
+        "spa": is_spa,
+        "js_score": js_score,
         "issues": issues,
         "actions": actions,
         "sample": sample
     }
 
-# ==============================
+# =============================
 # ROI MODEL
-# ==============================
+# =============================
 def roi(before, after):
     diff = after - before
     return {
-        "traffic_gain_%": round(diff * 2.1, 2),
-        "conversion_gain_%": round(diff * 0.8, 2),
-        "revenue_impact_eur": round(diff * 140, 2)
+        "traffic_gain_%": round(diff * 2.0, 2),
+        "conversion_gain_%": round(diff * 0.7, 2),
+        "revenue_impact_eur": round(diff * 120, 2)
     }
 
-# ==============================
+# =============================
 # UI
-# ==============================
+# =============================
 if urls_input:
     urls = [u.strip() for u in urls_input.split("\n") if u.strip()]
 
@@ -190,7 +219,7 @@ if urls_input:
     for r in results:
         st.markdown(f"---\n### {r['url']}")
         st.write(f"Framework: {r['framework']}")
-        st.write(f"Score global: {r['score']}/100")
+        st.write(f"Score: {r['score']}/100")
 
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("SEO", r["seo"])
@@ -208,5 +237,11 @@ if urls_input:
 
         st.write("### 📄 Content sample")
         st.code(r["sample"])
+
+        st.write("### 🧠 JS / SPA signals")
+        st.write({
+            "spa_detected": r["spa"],
+            "js_score": r["js_score"]
+        })
 else:
     st.info("Enter URLs to start analysis")
