@@ -1,18 +1,21 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
+from collections import Counter
+import pandas as pd
 
-st.set_page_config(page_title="LLM Readability Auditor", layout="wide")
+st.set_page_config(page_title="LLM Readability Audit", layout="wide")
 
-st.title("🧠 LLM Readability Audit Dashboard")
-st.write("Audit de lisibilité des sites pour IA / SEO / LLM (version cabinet de conseil)")
+st.title("🧠 LLM Readability Audit Dashboard – Pro Cabinet Version")
+st.write("Audit avancé + comparaison + plan d’actions pour optimisation SEO / LLM / UX")
 
-url = st.text_input("🔗 URL à analyser")
+url = st.text_input("🔗 URL principale à analyser")
+url_comp = st.text_input("⚖️ URL de comparaison (optionnel)")
 
 
 def get_html(url):
     headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, headers=headers, timeout=10)
+    r = requests.get(url, headers=headers, timeout=15)
     return r.text
 
 
@@ -23,89 +26,141 @@ def analyze(url):
     text = soup.get_text(separator=" ")
     words = len(text.split())
 
-    scripts = len(soup.find_all("script"))
     h1 = len(soup.find_all("h1"))
     h2 = len(soup.find_all("h2"))
-    links = len(soup.find_all("a"))
+    h3 = len(soup.find_all("h3"))
 
-    title = soup.title.text if soup.title else "Missing"
+    images = soup.find_all("img")
+    img_count = len(images)
+    missing_alt = len([img for img in images if not img.get("alt")])
 
-    js_heavy = scripts > 20
-    low_content = words < 300
-    good_structure = (h1 >= 1 and h2 >= 2)
+    scripts = soup.find_all("script")
+    script_count = len(scripts)
+
+    title = soup.title.text.strip() if soup.title else None
+
+    meta_desc = soup.find("meta", attrs={"name": "description"})
+    meta_desc_present = meta_desc is not None
+
+    is_spa_like = words < 80 and script_count > 10
 
     score = 100
-    if js_heavy:
-        score -= 25
-    if low_content:
-        score -= 25
-    if not good_structure:
+
+    issues = []
+
+    if script_count > 25:
         score -= 20
-    if title == "Missing":
+        issues.append("Forte dépendance JavaScript")
+
+    if words < 300:
+        score -= 20
+        issues.append("Faible contenu texte exploitable")
+
+    if h1 == 0:
+        score -= 15
+        issues.append("Absence de H1")
+
+    if h2 < 2:
         score -= 10
-    if words < 100:
-        score -= 20
+        issues.append("Structure H2 insuffisante")
+
+    if missing_alt > 0:
+        score -= 10
+        issues.append(f"{missing_alt} images sans alt")
+
+    if not meta_desc_present:
+        score -= 10
+        issues.append("Meta description manquante")
+
+    if is_spa_like:
+        score -= 15
+        issues.append("Site SPA-like (contenu injecté JS)")
 
     score = max(0, score)
 
     return {
-        "title": title,
+        "url": url,
+        "score": score,
         "words": words,
-        "scripts": scripts,
         "h1": h1,
         "h2": h2,
-        "links": links,
-        "score": score,
-        "js_heavy": js_heavy,
-        "low_content": low_content,
-        "good_structure": good_structure
+        "h3": h3,
+        "images": img_count,
+        "missing_alt": missing_alt,
+        "scripts": script_count,
+        "title": title,
+        "meta_description": meta_desc_present,
+        "issues": issues
     }
+
+
+def generate_actions(result):
+    actions = []
+
+    if result["script_count"] > 25:
+        actions.append("Réduire dépendance JavaScript ou passer en SSR (Next.js)")
+
+    if result["words"] < 300:
+        actions.append("Ajouter du contenu HTML statique (textes SEO visibles)")
+
+    if result["h1"] == 0:
+        actions.append("Ajouter un H1 unique par page")
+
+    if result["h2"] < 2:
+        actions.append("Structurer contenu avec H2 (sections claires)")
+
+    if result["missing_alt"] > 0:
+        actions.append("Ajouter attribut alt sur toutes les images")
+
+    if not result["meta_description"]:
+        actions.append("Ajouter meta description optimisée SEO")
+
+    if "SPA-like" in " ".join(result["issues"]):
+        actions.append("Passer en rendu serveur (SSR) pour lisibilité LLM")
+
+    return actions
 
 
 if url:
     try:
-        result = analyze(url)
+        main = analyze(url)
+
+        st.subheader("📊 Score principal")
+        st.metric("Score LLM / SEO", f"{main['score']}/100")
 
         col1, col2, col3 = st.columns(3)
+        col1.metric("Mots", main["words"])
+        col2.metric("Scripts", main["scripts"])
+        col3.metric("Images", main["images"])
 
-        with col1:
-            st.metric("⭐ Score LLM", f"{result['score']}/100")
-        with col2:
-            st.metric("🧾 Words", result['words'])
-        with col3:
-            st.metric("⚙️ Scripts", result['scripts'])
+        st.subheader("⚠️ Problèmes détectés")
+        for i in main["issues"]:
+            st.warning(i)
 
-        st.subheader("📊 Diagnostic")
+        st.subheader("🛠 Actions recommandées (priorisées)")
+        actions = generate_actions(main)
+        for a in actions:
+            st.success(a)
 
-        if result["js_heavy"]:
-            st.warning("Site fortement dépendant du JavaScript")
-        else:
-            st.success("Dépendance JavaScript raisonnable")
+        # COMPARAISON
+        if url_comp:
+            st.subheader("⚖️ Comparaison")
+            comp = analyze(url_comp)
 
-        if result["low_content"]:
-            st.warning("Faible densité de contenu lisible")
-        else:
-            st.success("Bonne densité de contenu")
+            df = pd.DataFrame([
+                {"Site": "Principal", "Score": main["score"]},
+                {"Site": "Comparé", "Score": comp["score"]}
+            ])
 
-        if result["good_structure"]:
-            st.success("Structure HTML correcte (H1/H2)")
-        else:
-            st.warning("Structure HTML insuffisante")
+            st.bar_chart(df.set_index("Site"))
 
-        st.subheader("📄 Détails")
-        st.json(result)
+            st.write("### Détail comparaison")
+            st.json({"principal": main, "comparé": comp})
 
-        st.subheader("🧠 Interprétation cabinet de conseil")
-
-        if result["score"] >= 80:
-            st.success("Site très bien optimisé pour LLM / SEO")
-        elif result["score"] >= 50:
-            st.warning("Site moyennement optimisé, améliorable")
-        else:
-            st.error("Site peu lisible pour IA / SEO faible")
+            diff = main["score"] - comp["score"]
+            st.metric("Écart de performance", diff)
 
     except Exception as e:
-        st.error(f"Erreur lors de l'analyse : {str(e)}")
-
+        st.error(f"Erreur : {str(e)}")
 else:
     st.info("Entre une URL pour lancer l'audit")
